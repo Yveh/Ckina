@@ -195,7 +195,7 @@ public:
             }
 
 		//set values in UTicket
-		if(flag)
+		if(true)
 		{
 			key.UserId=x.UserId;key.Date=x.Date;key.TrainId=x.TrainId;key.Catalog=Train.Catalog;
 			UserTicket.Insert(key,x.Num);
