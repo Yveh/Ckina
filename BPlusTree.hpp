@@ -7,22 +7,38 @@
 #include <fstream>
 #include <functional>
 #include <assert.h>
-
-
+//#define DEBUG
 enum NodeType{INTERNAL,LEAF};
 template <class Key,class Data,size_t Nodesize,class Cmp=std::less<Key>>
 class BPlusTree
 {
+	static const int MaxDepth = 5000;
+	static const int numeration = 257;
+	static const int sizelimit = 20011;
+	static const int hash_buffer_size = sizeof(Key);
 private:
 	std::fstream File;
 	std::string FileName;
 	ExMemory MemoryManager;
 
-	off_t Root,Head,Tail;
-	size_t ElementNumber = 0;
+	int hash_function(Key &key)
+	{
+		char * buffer = reinterpret_cast<char *>(&key);
+		int ans = 0;
+		for (int i = 0; i < hash_buffer_size; ++i)
+			ans = ans * numeration + buffer[i], ans %= sizelimit;
+		return ans;
+	}
+
+	struct bptree_info
+	{
+		off_t Root,Head,Tail;
+		size_t ElementNumber = 0;
+	}BPI;
 
 	Cmp Cmp1 = Cmp();// Cmp for single key.
-
+	off_t fatherlist[MaxDepth];
+	int facur;
 	class Block;
 	class Node
 	{
@@ -43,15 +59,10 @@ private:
 	const size_t M = (Nodesize - sizeof(Block)) / (sizeof(Data) + sizeof(Key)) - 1;
 #endif
 #ifdef DEBUG
-	const size_t N = 5;
-	const size_t M = 7;
+	const size_t N = 2;
+	const size_t M = 3;
 	#endif
 
-	Node new_node(NodeType nodetype,const Key &key)
-	{
-		Node *p = new Node(nodetype,key,0,MemoryManager.malloc(Nodesize));
-		return *p;
-	}
 	void delete_Node (Node &p)
 	{
 		if (p.pre != nulloff_t)
@@ -80,11 +91,6 @@ private:
 	public:
 		Block(size_t elementNumber = 0,Key key0 = Key(),off_t pos = nulloff_t,off_t pre = nulloff_t,off_t nex = nulloff_t,off_t father = nulloff_t) : elementNumber(elementNumber),key0(key0),pos(pos),pre(pre),nex(nex),father(father){}
 	};
-	Block new_block(const Key &key)
-	{
-		Block *b = new Block(0,key,MemoryManager.malloc(Nodesize));
-		return *b;
-	}
 	void delete_block(Block &b)
 	{
 		if (b.pre != nulloff_t)
@@ -105,18 +111,20 @@ private:
 	}
 	void read_bptree_info() {
 		File.seekg(0);
-		File.read(reinterpret_cast<char *>(&Root), sizeof(off_t));
-		File.read(reinterpret_cast<char *>(&Head), sizeof(off_t));
-		File.read(reinterpret_cast<char *>(&Tail), sizeof(off_t));
-		File.read(reinterpret_cast<char *>(&ElementNumber),sizeof(size_t));
+		File.read(reinterpret_cast<char *>(&BPI), sizeof(bptree_info));
+//		File.read(reinterpret_cast<char *>(&Root), sizeof(off_t));
+//		File.read(reinterpret_cast<char *>(&Head), sizeof(off_t));
+//		File.read(reinterpret_cast<char *>(&Tail), sizeof(off_t));
+//		File.read(reinterpret_cast<char *>(&ElementNumber),sizeof(size_t));
 	}
 	void write_bptree_info()
 	{
 		File.seekp(0);
-		File.write(reinterpret_cast<char *>(&Root),sizeof(off_t));
-		File.write(reinterpret_cast<char *>(&Head),sizeof(off_t));
-		File.write(reinterpret_cast<char *>(&Tail),sizeof(off_t));
-		File.write(reinterpret_cast<char *>(&ElementNumber),sizeof(size_t));
+		File.write(reinterpret_cast<char *>(&BPI), sizeof(bptree_info));
+//		File.write(reinterpret_cast<char *>(&Root),sizeof(off_t));
+//		File.write(reinterpret_cast<char *>(&Head),sizeof(off_t));
+//		File.write(reinterpret_cast<char *>(&Tail),sizeof(off_t));
+//		File.write(reinterpret_cast<char *>(&ElementNumber),sizeof(size_t));
 		File.flush();
 	}
 	Node read_node(off_t root) {
@@ -260,7 +268,7 @@ private:
 //#ifdef DEBUG
 //		std::cout << "Block before insert: ";
 //        for (int i = 0; i < b.elementNumber ; ++i)
-//            std::cout << i << " " << *key_n_in_block(i,buffer) << " " << *data_n_in_block(i,buffer) << "\n";
+//            std::cout << i << " (" << (*key_n_in_block(i,buffer)).first << "," << (*key_n_in_block(i,buffer)).second << ") " << *data_n_in_block(i,buffer) << "\n";
 //		#endif
 		int n = search_rank_in_block_lowerbound(key,b,buffer);
 		if (n + 1 >= 0 && n + 1 < b.elementNumber && (IsEqual(*key_n_in_block(n + 1,buffer),key)))
@@ -278,11 +286,23 @@ private:
 		    Key prekey = b.key0;
 		    b.key0 = key;
 		    write_block(b);
-		    off_t fa_off = b.father;
+			int fa_off_dep = facur - 1;
+//#ifdef DEBUG
+//            std::cout << "fa_off_dep :" << fa_off_dep << "\n";
+//            if (fa_off_dep >= 0)
+//                std::cout << "fa_off_dep :" << fatherlist[fa_off_dep] << "\n";
+//			#endif
+		    //off_t fa_off = b.father;
 		    int n1 = n;
-		    while (n1 == -1)
+		    while (n1 == -1 && fa_off_dep >= 0)
             {
-                Node fa = read_node(fa_off);
+//#ifdef DEBUG
+//                std::cout << "fa_off_dep :" << fa_off_dep << "\n";
+//                if (fa_off_dep >= 0)
+//                    std::cout << "fa_off_dep :" << fatherlist[fa_off_dep] << "\n";
+//#endif
+		    	Node fa = read_node(fatherlist[fa_off_dep]);
+                //Node fa = read_node(fa_off);
                 if (fa.elementNumber == 0)
                     break;
                 char buffer1[Nodesize];
@@ -294,50 +314,24 @@ private:
                 {
                     fa.key0 = key;
                     write_node(fa);
-                    fa_off = fa.father;
-                    if (fa_off == nulloff_t)
+                    --fa_off_dep;
+                    if (fatherlist[fa_off_dep] == nulloff_t)
                         break;
+                    //fa_off = fa.father;
+                    //if (fa_off == nulloff_t)
+                    //    break;
                 }
             }
-//		    Node tmp = read_node(b.father);
-//		    if (tmp.elementNumber)
-//            {
-//                char buffer1[Nodesize];
-//                fill_buffer_with_node(buffer1,tmp);
-//                int n1 = search_rank_in_node_lowerbound(b.key0,tmp,buffer1);
-//                b.key0 = key;
-//                    *key_n_in_node(n1 + 1,buffer1) = key;
-//                    write_buffer_into_node(buffer1,tmp);
-//                while(n1 == -1)
-//                {
-//                    tmp.key0 = key;
-//                    write_node(tmp);
-//                    if (tmp.father == nulloff_t)
-//                        break;
-//                    Node np = tmp;
-//                    tmp = read_node(tmp.father);
-//                    fill_buffer_with_node(buffer1,tmp);
-//                    n1 = search_rank_in_node_lowerbound(np.key0,tmp,buffer1);
-//                }
-//                /*if (n1 == -1)
-//                {
-//                    tmp.key0 = key;
-//                    write_node(tmp);
-//                }*/
-//            }
-//            else
-//                b.key0 = key;
-
         }
 //#ifdef DEBUG
 //        std::cout << "Block after insert: ";
 //        for (int i = 0; i <= b.elementNumber ; ++i)
-//            std::cout << i << " " << *key_n_in_block(i,buffer) << " " << *data_n_in_block(i,buffer) << "\n";
+//            std::cout << i << " (" << (*key_n_in_block(i,buffer)).first << "," << (*key_n_in_block(i,buffer)).second << ") " << *data_n_in_block(i,buffer) << "\n";
 //#endif
 		if (++b.elementNumber > M)
 		{
 			Block b2 = Block(0,*key_n_in_block((M >> 1) + 1,buffer),MemoryManager.malloc(Nodesize));
-			b2.father = b.father;
+//			b2.father = b.father;
 			b2.pre = b.pos;
 			b2.nex = b.nex;
 			b.nex = b2.pos;
@@ -348,7 +342,7 @@ private:
 				write_block(b3);
 			}
 			else
-				Tail = b2.pos;
+				BPI.Tail = b2.pos;
 			b2.key0 = *key_n_in_block((M >> 1) + 1,buffer);
 			b2.elementNumber = M - (M >> 1);
 			b.elementNumber = (M >> 1) + 1;
@@ -361,14 +355,18 @@ private:
 			}
 			write_block(b2);
 			write_buffer_into_block(buffer2,b2);
-			Node p = read_node(b.father);
+//#ifdef DEBUG
+//            std::cout << "facur: " << facur << "\n";
+//            std::cout << "fa: " << fatherlist[facur - 1] << "\n";
+//			#endif
+			Node p = read_node(fatherlist[--facur]);
 			node_insert(p,b2.key0,b2.pos);
 		}
 //#ifdef DEBUG
 //        std::cout << "Block after insert adjust: ";
 //        for (int i = 0; i < b.elementNumber ; ++i)
-//            std::cout << i << " " << *key_n_in_block(i,buffer) << " " << *data_n_in_block(i,buffer) << "\n";
-//#endif
+//            std::cout << i << " (" << (*key_n_in_block(i,buffer)).first << "," << (*key_n_in_block(i,buffer)).second << ") " << *data_n_in_block(i,buffer) << "\n";
+//            #endif
 		write_buffer_into_block(buffer,b);
 		write_block(b);
 		return 1;
@@ -380,7 +378,7 @@ private:
 //#ifdef DEBUG
 //        std::cout << "Node before insert : ";
 //        for (int i = 0; i < p.elementNumber ; ++i)
-//            std::cout << i << " " << *key_n_in_node(i,buffer) << " " << *pos_n_in_node(i,buffer) << "\n";
+//            std::cout << i << " (" << (*key_n_in_block(i,buffer)).first << "," << (*key_n_in_block(i,buffer)).second << ") " << *pos_n_in_node(i,buffer) << "\n";
 //#endif
 		int n = search_rank_in_node_lowerbound(key,p,buffer);
 //		if (n >= 0 && n < p.elementNumber && *key_n_in_node(n) == key)
@@ -397,11 +395,15 @@ private:
             Key prekey = p.key0;
             p.key0 = key;
             write_node(p);
-            off_t fa_off = p.father;
+            int fa_off_dep = facur - 1;
+            //off_t fa_off = p.father;
             int n1 = n;
-            while (n1 == -1 && fa_off != nulloff_t)
+            //while (n1 == -1 && fa_off != nulloff_t)
+            //while (n1 == -1 && fa_off_dep >= 0)
+            while (n1 == -1 && fa_off_dep > 0)
             {
-                Node fa = read_node(fa_off);
+//                Node fa = read_node(fa_off);
+                Node fa = read_node(fatherlist[fa_off_dep]);
                 if (fa.elementNumber == 0)
                     break;
                 char buffer1[Nodesize];
@@ -413,39 +415,20 @@ private:
                 {
                     fa.key0 = key;
                     write_node(fa);
-                    fa_off = fa.father;
+                    --fa_off_dep;
+//                    fa_off = fa.father;
                 }
             }
         }
-//		if (n == -1)
-//        {
-//		    if (p.father == nulloff_t)
-//		        p.key0 = key;
-//		    else
-//            {
-//                Node tmp = read_node(p.father);
-//                char buffer1[Nodesize];
-//                fill_buffer_with_node(buffer1,tmp);
-//                int n1 = search_rank_in_node_lowerbound(p.key0,tmp,buffer1);
-//                p.key0 = key;
-//                *key_n_in_node(n1 + 1,buffer1) = key;
-//                if (n1 == -1)
-//                {
-//                    tmp.key0 = key;
-//                    write_node(tmp);
-//                }
-//                write_buffer_into_node(buffer1,tmp);
-//            }
-//        }
 //#ifdef DEBUG
 //        std::cout << "Node after insert : ";
 //        for (int i = 0; i <= p.elementNumber ; ++i)
-//            std::cout << i << " " << *key_n_in_node(i,buffer) << " " << *pos_n_in_node(i,buffer) << "\n";
-//#endif
+//            std::cout << i << " (" << (*key_n_in_block(i,buffer)).first << "," << (*key_n_in_block(i,buffer)).second << ") " << *pos_n_in_node(i,buffer) << "\n";
+//        #endif
 		if (++p.elementNumber > N)
 		{
 			Node p2 = Node(p.nodeType,*key_n_in_node((M >> 1) + 1,buffer),0,MemoryManager.malloc(Nodesize));
-			p2.father = p.father;
+			//p2.father = p.father;
 			p2.pre = p.pos;
 			p2.nex = p.nex;
 			p.nex = p2.pos;
@@ -467,15 +450,17 @@ private:
 			}
 			write_buffer_into_node(buffer2,p2);
 			write_node(p2);
-			if (p.father != nulloff_t)
+			//if (p.father != nulloff_t)
+			if(fatherlist[facur - 1] != nulloff_t)
 			{
-				Node pf = read_node(p.father);
+				Node pf = read_node(fatherlist[--facur]);
 				node_insert(pf,p2.key0,p2.pos);
 			}
 			else
 			{
 				Node newroot = Node(INTERNAL,p.key0,0,MemoryManager.malloc(Nodesize));
-				p.father = p2.father = Root = newroot.pos;
+				//p.father = p2.father =
+                BPI.Root = newroot.pos;
 				newroot.elementNumber = 2;
 				newroot.key0 = p.key0;
 				char buffer3[Nodesize];
@@ -492,8 +477,8 @@ private:
 //#ifdef DEBUG
 //        std::cout << "Node after insert adjust: ";
 //        for (int i = 0; i < p.elementNumber ; ++i)
-//            std::cout << i << " " << *key_n_in_node(i,buffer) << " " << *pos_n_in_node(i,buffer) << "\n";
-//#endif
+//            std::cout << i << " (" << (*key_n_in_block(i,buffer)).first << "," << (*key_n_in_block(i,buffer)).second << ") " << *pos_n_in_node(i,buffer) << "\n";
+//            #endif
 		write_buffer_into_node(buffer,p);
 		write_node(p);
 	}
@@ -624,18 +609,18 @@ private:
 		}
 		if (n == 0)
 			p.key0 = *key_n_in_node(0,buffer);
-		if (p.elementNumber == 1 && p.pos == Root)
+		if (p.elementNumber == 1 && p.pos == BPI.Root)
 		{
-			if (ElementNumber == 1)
+			if (BPI.ElementNumber == 1)
 			{
 				this->Clear();
 				return;
 			}
-			Root = *pos_n_in_node(0,buffer);
+			BPI.Root = *pos_n_in_node(0,buffer);
 			delete_Node(p);
 			return;
 		}
-		if (--p.elementNumber < (N + 1) >> 1 && ElementNumber > N)
+		if (--p.elementNumber < (N + 1) >> 1 && BPI.ElementNumber > N)
 		{
 			if (p.nex == nulloff_t)
 			{
@@ -735,7 +720,7 @@ private:
 //			b.key0 = *key_n_in_block(0,buffer);
 //		    //tobe change
 //        }
-		if (--b.elementNumber < (M + 1) >> 1 && ElementNumber > M)
+		if (--b.elementNumber < (M + 1) >> 1 && BPI.ElementNumber > M)
 		{
 			if (b.nex == nulloff_t)
 			{
@@ -853,8 +838,9 @@ private:
 	}
 	int insert_subtree(const Key &key,const Data &data,Node &root,off_t pa)
 	{
-	    root.father = pa;
-	    write_node(root);
+		fatherlist[facur++] = pa;
+//	    root.father = pa;
+//	    write_node(root);
 		char buffer[Nodesize];
 		fill_buffer_with_node(buffer,root);
 		int n = search_rank_in_node_lowerbound(key,root,buffer);
@@ -867,7 +853,8 @@ private:
 				b = read_block(*pos_n_in_node(0,buffer));
 			else
 				b = read_block(*pos_n_in_node(n,buffer));
-			b.father = root.pos;
+			fatherlist[facur++] = root.pos;
+//			b.father = root.pos;
 			int tmp = block_insert(b,key,data);
 			root.elementNumber += tmp;
 			return tmp;
@@ -1116,60 +1103,65 @@ public:
 
 	int Find(const Key &key,Data &data)
 	{
-		if (Root == nulloff_t)
+		if (BPI.Root == nulloff_t)
 			return 0;
-		return find_subtree(key,data,Root);
+		return find_subtree(key,data,BPI.Root);
 	}
 	int Erase(const Key &key)
 	{
-		if (Root == nulloff_t)
+		if (BPI.Root == nulloff_t)
 			return 0;
-        Node p = read_node(Root);
+        Node p = read_node(BPI.Root);
         int res = erase_subtree(key,p);
-		ElementNumber -= res;
+		BPI.ElementNumber -= res;
 		return res;
 	}
 
 	int Insert(const Key &key,const Data &data)
 	{
-		if(Root == nulloff_t)
+		if(BPI.Root == nulloff_t)
 		{
 			Node p = Node(LEAF,key,0,MemoryManager.malloc(Nodesize));
 			Block b = Block(0,key,MemoryManager.malloc(Nodesize));
-			b.father = Root = p.pos;
+			facur = 2;
+			fatherlist[0] = nulloff_t;
+			fatherlist[1] = BPI.Root = p.pos;
+//			b.father = BPI.Root = p.pos;
 			block_insert(b,key,data);
+			--facur;
 			node_insert(p,key,b.pos);
-			Head = Tail = b.pos;
+			BPI.Head = BPI.Tail = b.pos;
 			write_bptree_info();
-			ElementNumber = 1;
+			BPI.ElementNumber = 1;
 			return 1;
 		}
-        Node p = read_node(Root);
+        Node p = read_node(BPI.Root);
 //#ifdef DEBUG
 //        std::cout << "NdTp" << p.nodeType << "\n";
 //#endif
+		facur = 0;
 		int tmp = insert_subtree(key,data,p,nulloff_t);
-		ElementNumber += tmp;
+		BPI.ElementNumber += tmp;
 		write_bptree_info();
 		return tmp;
 	}
 	int Modify(const Key &key,const Data &data)
 	{
-		if (Root == nulloff_t)
+		if (BPI.Root == nulloff_t)
 			return 0;
-		return modify_subtree(key,data,Root);
+		return modify_subtree(key,data,BPI.Root);
 	}
 	int AskArr(const Key &key,std::function<bool(const Key &,const Key &)>CMP,sjtu::vector<Key> &vect1,sjtu::vector<Data> &vect2)
 	{
-        if (Root == nulloff_t)
+        if (BPI.Root == nulloff_t)
             return 0;
-        Node p = read_node(Root);
+        Node p = read_node(BPI.Root);
         return askarr_subtree(key,CMP,vect1,vect2,p);
 	}
 
 	int Size()
     {
-	    return ElementNumber;
+	    return BPI.ElementNumber;
     }
 
 	void Clear()
@@ -1178,8 +1170,8 @@ public:
 		File.open(FileName,std::ios::binary|std::ios::in|std::ios::out|std::ios::trunc);
 		MemoryManager.clear();
 		MemoryManager.write_info();
-		Root = Head = Tail = nulloff_t;
-		ElementNumber = 0;
+		BPI.Root = BPI.Head = BPI.Tail = nulloff_t;
+		BPI.ElementNumber = 0;
 		write_bptree_info();
 	}
 
@@ -1187,7 +1179,7 @@ public:
 	void printinfo()
 	{
 		std::cout << "NowBptreeInfo\n";
-		std::cout << Root << " " << Head << " " << Tail << " " << ElementNumber << "\n";
+		std::cout << BPI.Root << " " << BPI.Head << " " << BPI.Tail << " " << BPI.ElementNumber << "\n";
 		std::cout.flush();
 	}
 #endif
