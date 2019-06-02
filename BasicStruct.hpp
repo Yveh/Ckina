@@ -116,7 +116,7 @@ bool operator<(const UTicketKey &t,const UTicketKey &o)
 	if (t.Catalog<o.Catalog) return true;
 	if (t.Catalog>o.Catalog) return false;
 	//
-	return (t.l1*137+t.l2*13+t.Kind<o.l1*137+o.l2*13+o.Kind);
+	return (t.l1*240+t.l2*4+t.Kind<o.l1*240+o.l2*4+o.Kind);
 }
 bool Cmp_UT(const UTicketKey &x,const UTicketKey &y)
 {
